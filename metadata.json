@@ -1,0 +1,6 @@
+{
+  "name": "Landala OS",
+  "description": "Relaxing web operating system with customizable organic themes, lofi background sounds, and sandbox mini-apps.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
