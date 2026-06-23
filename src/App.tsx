@@ -28,6 +28,8 @@ import SystemAppStore from './components/SystemAppStore';
 import SystemAppGame from './components/SystemAppGame';
 import SystemAppWebSandbox from './components/SystemAppWebSandbox';
 import SystemAppFiles from './components/SystemAppFiles';
+import SystemAppTerminal from './components/SystemAppTerminal';
+import SystemAppTrash from './components/SystemAppTrash';
 
 // Lucide Icons
 import { 
@@ -49,7 +51,9 @@ import {
   Search,
   BookOpen,
   VolumeX,
-  Smile
+  Smile,
+  Terminal as TerminalIcon,
+  Trash2
 } from 'lucide-react';
 
 // LANDALA Logo Component (Capital L overlaying a wavy 7-color organic timber rainbow)
@@ -79,6 +83,8 @@ const SYSTEM_APPS_METADATA: AppMetadata[] = [
   { id: 'settings', title: 'Settings', icon: 'settings', type: 'system' },
   { id: 'photos', title: 'Wallpaper Photos', icon: 'photos', type: 'system' },
   { id: 'store', title: 'App Store', icon: 'store', type: 'system' },
+  { id: 'terminal', title: 'Terminal Shell', icon: 'terminal', type: 'system' },
+  { id: 'trash', title: 'Trash Bin', icon: 'trash', type: 'system' },
 ];
 
 const PRE_INSTALLED_GAMES: AppMetadata[] = [
@@ -124,6 +130,19 @@ export default function App() {
     };
   });
 
+  const initialUsername = (() => {
+    if (localStorage.getItem('landala_is_logged_in') === 'true') {
+      const saved = localStorage.getItem('landala_session_profile');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          return parsed.username || 'fossguru';
+        } catch (e) {}
+      }
+    }
+    return '';
+  })();
+
   const [activeThemeId, setActiveThemeId] = useState<ThemeId>(() => {
     const saved = localStorage.getItem('landala_session_profile');
     if (saved) {
@@ -134,16 +153,85 @@ export default function App() {
     }
     return 'kashmir-wood';
   });
-  const [currentWallpaper, setCurrentWallpaper] = useState('');
+  const [currentWallpaper, setCurrentWallpaper] = useState(() => {
+    if (initialUsername) {
+      const saved = localStorage.getItem(`landala_current_wallpaper_${initialUsername}`);
+      if (saved) return saved;
+    }
+    const savedProfile = localStorage.getItem('landala_session_profile');
+    let themeId: ThemeId = 'kashmir-wood';
+    if (savedProfile) {
+      try {
+        themeId = JSON.parse(savedProfile).selectedTheme || 'kashmir-wood';
+      } catch (e) {}
+    }
+    return getTheme(themeId).wallpaperUrl;
+  });
   const [installedApps, setInstalledApps] = useState<AppMetadata[]>(() => {
+    if (initialUsername) {
+      const saved = localStorage.getItem(`landala_installed_apps_${initialUsername}`);
+      if (saved) {
+        try {
+          const parsed: AppMetadata[] = JSON.parse(saved);
+          // Always make sure terminal and trash exist in user's layout
+          const missing = SYSTEM_APPS_METADATA.filter(sys => !parsed.some(p => p.id === sys.id));
+          if (missing.length > 0) {
+            return [...parsed, ...missing];
+          }
+          return parsed;
+        } catch (e) {}
+      }
+    }
     return [...SYSTEM_APPS_METADATA, ...PRE_INSTALLED_GAMES];
   });
-  const [activeWindows, setActiveWindows] = useState<AppWindow[]>([]);
-  const [maxZIndex, setMaxZIndex] = useState(10);
-  const [browserEngine, setBrowserEngine] = useState<BrowserEngine>('google');
+  const [trashedApps, setTrashedApps] = useState<AppMetadata[]>(() => {
+    if (initialUsername) {
+      const saved = localStorage.getItem(`landala_trashed_apps_${initialUsername}`);
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {}
+      }
+    }
+    return [];
+  });
+  const [trashToast, setTrashToast] = useState<string | null>(null);
+  const [activeWindows, setActiveWindows] = useState<AppWindow[]>(() => {
+    if (initialUsername) {
+      const saved = localStorage.getItem(`landala_active_windows_${initialUsername}`);
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {}
+      }
+    }
+    return [];
+  });
+  const [maxZIndex, setMaxZIndex] = useState(() => {
+    if (initialUsername) {
+      const saved = localStorage.getItem(`landala_max_z_index_${initialUsername}`);
+      if (saved) return parseInt(saved, 10);
+    }
+    return 10;
+  });
+  const [browserEngine, setBrowserEngine] = useState<BrowserEngine>(() => {
+    if (initialUsername) {
+      const saved = localStorage.getItem(`landala_browser_engine_${initialUsername}`);
+      if (saved) return saved as BrowserEngine;
+    }
+    return 'google';
+  });
 
   // Icon Positions for absolutely situated draggable icons
   const [iconPositions, setIconPositions] = useState<Record<string, { x: number; y: number }>>(() => {
+    if (initialUsername) {
+      const saved = localStorage.getItem(`landala_icon_positions_${initialUsername}`);
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {}
+      }
+    }
     const saved = localStorage.getItem('landala_icon_positions');
     if (saved) {
       try {
@@ -185,11 +273,7 @@ export default function App() {
     const newX = Math.max(10, Math.min(window.innerWidth - 100, draggedIcon.appX + dx));
     const newY = Math.max(10, Math.min(window.innerHeight - 150, draggedIcon.appY + dy));
 
-    setIconPositions(prev => {
-      const updated = { ...prev, [draggedIcon.id]: { x: newX, y: newY } };
-      localStorage.setItem('landala_icon_positions', JSON.stringify(updated));
-      return updated;
-    });
+    setIconPositions(prev => ({ ...prev, [draggedIcon.id]: { x: newX, y: newY } }));
   };
 
   const handleIconPointerUp = (e: React.PointerEvent, appSnapshot: AppMetadata) => {
@@ -204,6 +288,23 @@ export default function App() {
     // If it was parsed as a clean click (scarcely moved), launch the app immediately!
     if (!wasDragged) {
       launchApp(appSnapshot);
+    } else {
+      // Check collision/overlap with Trash Bin icon!
+      const finalPos = iconPositions[appSnapshot.id];
+      if (finalPos && appSnapshot.id !== 'trash') {
+        const trashIndex = installedApps.findIndex(a => a.id === 'trash');
+        const trashPos = iconPositions['trash'] || (trashIndex !== -1 ? {
+          x: 24 + Math.floor(trashIndex / 5) * 110,
+          y: 24 + (trashIndex % 5) * 110
+        } : null);
+
+        if (trashPos) {
+          const dist = Math.sqrt(Math.pow(finalPos.x - trashPos.x, 2) + Math.pow(finalPos.y - trashPos.y, 2));
+          if (dist < 65) {
+            handleMoveToTrash(appSnapshot);
+          }
+        }
+      }
     }
   };
 
@@ -229,6 +330,24 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  const handleThemeChange = (newThemeId: ThemeId) => {
+    setActiveThemeId(newThemeId);
+    const updatedProfile = { ...profile, selectedTheme: newThemeId };
+    setProfile(updatedProfile);
+    localStorage.setItem('landala_session_profile', JSON.stringify(updatedProfile));
+    
+    if (isLoggedIn && profile?.username) {
+      const accountsSaved = localStorage.getItem('landala_registered_accounts');
+      if (accountsSaved) {
+        try {
+          const accountsList: UserProfile[] = JSON.parse(accountsSaved);
+          const nextList = accountsList.map(acc => acc.username.toLowerCase() === profile.username.toLowerCase() ? updatedProfile : acc);
+          localStorage.setItem('landala_registered_accounts', JSON.stringify(nextList));
+        } catch (e) {}
+      }
+    }
+  };
+
   const handleLoginComplete = (userProfile: UserProfile) => {
     setProfile(userProfile);
     setActiveThemeId(userProfile.selectedTheme);
@@ -236,6 +355,158 @@ export default function App() {
     localStorage.setItem('landala_session_profile', JSON.stringify(userProfile));
     localStorage.setItem('landala_is_logged_in', 'true');
     playAsmrClick();
+
+    // Dynamically transition all user configuration states on login complete
+    const username = userProfile.username;
+
+    // 1. Wallpaper
+    const savedWallpaper = localStorage.getItem(`landala_current_wallpaper_${username}`);
+    if (savedWallpaper) {
+      setCurrentWallpaper(savedWallpaper);
+    } else {
+      const theme = getTheme(userProfile.selectedTheme);
+      setCurrentWallpaper(theme.wallpaperUrl);
+    }
+
+    // 2. Installed Apps
+    const savedApps = localStorage.getItem(`landala_installed_apps_${username}`);
+    if (savedApps) {
+      try {
+        const parsed: AppMetadata[] = JSON.parse(savedApps);
+        const missing = SYSTEM_APPS_METADATA.filter(sys => !parsed.some(p => p.id === sys.id));
+        if (missing.length > 0) {
+          setInstalledApps([...parsed, ...missing]);
+        } else {
+          setInstalledApps(parsed);
+        }
+      } catch (e) {}
+    } else {
+      setInstalledApps([...SYSTEM_APPS_METADATA, ...PRE_INSTALLED_GAMES]);
+    }
+
+    // 2b. Trashed Apps
+    const savedTrashed = localStorage.getItem(`landala_trashed_apps_${username}`);
+    if (savedTrashed) {
+      try {
+        setTrashedApps(JSON.parse(savedTrashed));
+      } catch (e) {}
+    } else {
+      setTrashedApps([]);
+    }
+
+    // 3. Active Windows
+    const savedWindows = localStorage.getItem(`landala_active_windows_${username}`);
+    if (savedWindows) {
+      try {
+        setActiveWindows(JSON.parse(savedWindows));
+      } catch (e) {}
+    } else {
+      setActiveWindows([]);
+    }
+
+    // 4. Max ZIndex
+    const savedZIndex = localStorage.getItem(`landala_max_z_index_${username}`);
+    if (savedZIndex) {
+      setMaxZIndex(parseInt(savedZIndex, 10));
+    } else {
+      setMaxZIndex(10);
+    }
+
+    // 5. Browser Engine
+    const savedEngine = localStorage.getItem(`landala_browser_engine_${username}`);
+    if (savedEngine) {
+      setBrowserEngine(savedEngine as BrowserEngine);
+    } else {
+      setBrowserEngine('google');
+    }
+
+    // 6. Icon Positions
+    const savedPositions = localStorage.getItem(`landala_icon_positions_${username}`);
+    if (savedPositions) {
+      try {
+        setIconPositions(JSON.parse(savedPositions));
+      } catch (e) {}
+    } else {
+      setIconPositions({});
+    }
+
+    // Save this profile in the list of available accounts!
+    const accountsSaved = localStorage.getItem('landala_registered_accounts');
+    let accountsList: UserProfile[] = [];
+    if (accountsSaved) {
+      try {
+        accountsList = JSON.parse(accountsSaved);
+      } catch (e) {}
+    }
+    if (!accountsList.some(acc => acc.username.toLowerCase() === userProfile.username.toLowerCase())) {
+      accountsList.push(userProfile);
+    } else {
+      accountsList = accountsList.map(acc => acc.username.toLowerCase() === userProfile.username.toLowerCase() ? userProfile : acc);
+    }
+    localStorage.setItem('landala_registered_accounts', JSON.stringify(accountsList));
+  };
+
+  // Synchronize dynamic user edits to localStorage per account
+  useEffect(() => {
+    if (isLoggedIn && profile?.username) {
+      localStorage.setItem(`landala_installed_apps_${profile.username}`, JSON.stringify(installedApps));
+    }
+  }, [installedApps, isLoggedIn, profile?.username]);
+
+  useEffect(() => {
+    if (isLoggedIn && profile?.username) {
+      localStorage.setItem(`landala_trashed_apps_${profile.username}`, JSON.stringify(trashedApps));
+    }
+  }, [trashedApps, isLoggedIn, profile?.username]);
+
+  useEffect(() => {
+    if (isLoggedIn && profile?.username) {
+      localStorage.setItem(`landala_active_windows_${profile.username}`, JSON.stringify(activeWindows));
+    }
+  }, [activeWindows, isLoggedIn, profile?.username]);
+
+  useEffect(() => {
+    if (isLoggedIn && profile?.username) {
+      localStorage.setItem(`landala_max_z_index_${profile.username}`, maxZIndex.toString());
+    }
+  }, [maxZIndex, isLoggedIn, profile?.username]);
+
+  useEffect(() => {
+    if (isLoggedIn && profile?.username) {
+      localStorage.setItem(`landala_browser_engine_${profile.username}`, browserEngine);
+    }
+  }, [browserEngine, isLoggedIn, profile?.username]);
+
+  useEffect(() => {
+    if (isLoggedIn && profile?.username && currentWallpaper) {
+      localStorage.setItem(`landala_current_wallpaper_${profile.username}`, currentWallpaper);
+    }
+  }, [currentWallpaper, isLoggedIn, profile?.username]);
+
+  useEffect(() => {
+    if (isLoggedIn && profile?.username) {
+      localStorage.setItem(`landala_icon_positions_${profile.username}`, JSON.stringify(iconPositions));
+    }
+  }, [iconPositions, isLoggedIn, profile?.username]);
+
+  const handleMoveToTrash = (app: AppMetadata) => {
+    if (app.id === 'trash' || app.id === 'terminal' || app.id === 'settings' || app.id === 'files') {
+      setTrashToast(`"${app.title}" is a protected system module and cannot be uninstalled.`);
+      setTimeout(() => setTrashToast(null), 4000);
+      playAsmrTick();
+      return;
+    }
+    setInstalledApps(prev => prev.filter(p => p.id !== app.id));
+    setActiveWindows(prev => prev.filter(w => w.id !== app.id));
+    setTrashedApps(prev => {
+      if (!prev.some(t => t.id === app.id)) {
+        return [...prev, app];
+      }
+      return prev;
+    });
+    playBubbleSound();
+    setTrashToast(`Successfully moved "${app.title}" to the Trash Bin.`);
+    setTimeout(() => setTrashToast(null), 4000);
   };
 
   const handleLogoClick = () => {
@@ -371,6 +642,8 @@ export default function App() {
     if (app.id === 'photos') { IconElem = ImageIcon; colorClass = 'text-purple-100'; iconBgClass = 'bg-indigo-500'; }
     if (app.id === 'store') { IconElem = ShoppingBag; colorClass = 'text-emerald-100'; iconBgClass = 'bg-emerald-500'; }
     if (app.id === 'files') { IconElem = Folder; colorClass = 'text-green-105'; iconBgClass = 'bg-teal-600'; }
+    if (app.id === 'terminal') { IconElem = TerminalIcon; colorClass = 'text-amber-400'; iconBgClass = 'bg-stone-900 border border-stone-700/50'; }
+    if (app.id === 'trash') { IconElem = Trash2; colorClass = 'text-rose-100'; iconBgClass = 'bg-rose-500'; }
 
     return (
       <div className="w-16 h-16 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 flex items-center justify-center shadow-lg transition-transform hover:scale-105">
@@ -479,8 +752,18 @@ export default function App() {
                         onProfileUpdate={(updated) => {
                           setProfile(updated);
                           localStorage.setItem('landala_session_profile', JSON.stringify(updated));
+                          
+                          // Also update registered_accounts list so they stay perfectly in sync!
+                          const accountsSaved = localStorage.getItem('landala_registered_accounts');
+                          if (accountsSaved) {
+                            try {
+                              const accountsList: UserProfile[] = JSON.parse(accountsSaved);
+                              const nextList = accountsList.map(acc => acc.username.toLowerCase() === updated.username.toLowerCase() ? updated : acc);
+                              localStorage.setItem('landala_registered_accounts', JSON.stringify(nextList));
+                            } catch (e) {}
+                          }
                         }}
-                        onThemeChange={setActiveThemeId}
+                        onThemeChange={handleThemeChange}
                         onEngineChange={setBrowserEngine}
                       />
                     )}
@@ -488,6 +771,7 @@ export default function App() {
                     {app.id === 'files' && (
                       <SystemAppFiles
                         theme={themeConfig}
+                        username={profile.username}
                       />
                     )}
 
@@ -513,6 +797,43 @@ export default function App() {
                         app={app}
                         theme={themeConfig}
                         defaultEngine={browserEngine}
+                        username={profile.username}
+                      />
+                    )}
+
+                    {app.id === 'terminal' && (
+                      <SystemAppTerminal
+                        theme={themeConfig}
+                        username={profile.username}
+                        onThemeChange={handleThemeChange}
+                        installedApps={installedApps}
+                        onInstallApp={handleStoreInstall}
+                        onUninstallApp={handleStoreUninstall}
+                      />
+                    )}
+
+                    {app.id === 'trash' && (
+                      <SystemAppTrash
+                        theme={themeConfig}
+                        trashedApps={trashedApps}
+                        onRestoreApp={(restoredApp) => {
+                          setTrashedApps(prev => prev.filter(a => a.id !== restoredApp.id));
+                          setInstalledApps(prev => {
+                            if (!prev.some(a => a.id === restoredApp.id)) {
+                              return [...prev, restoredApp];
+                            }
+                            return prev;
+                          });
+                          playBubbleSound();
+                        }}
+                        onPermanentlyDeleteApp={(appId) => {
+                          setTrashedApps(prev => prev.filter(a => a.id !== appId));
+                          playBubbleSound();
+                        }}
+                        onEmptyTrash={() => {
+                          setTrashedApps([]);
+                          playBubbleSound();
+                        }}
                       />
                     )}
 
@@ -529,6 +850,7 @@ export default function App() {
                       <SystemAppWebSandbox
                         app={app}
                         theme={themeConfig}
+                        username={profile.username}
                       />
                     )}
                   </WindowFrame>
@@ -804,6 +1126,14 @@ export default function App() {
             </div>
 
           </div>
+
+          {/* TRASH SYSTEM NOTIFICATIONS / TOASTS */}
+          {trashToast && (
+            <div className="absolute top-4 right-4 z-[999999] bg-stone-950/95 text-stone-100 border border-stone-800 p-3 px-4 rounded-xl flex items-center gap-2.5 shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200 font-mono text-[11px]">
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+              <span>{trashToast}</span>
+            </div>
+          )}
 
         </div>
       )}

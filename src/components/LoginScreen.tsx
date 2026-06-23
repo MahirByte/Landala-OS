@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { THEMES } from './ThemeConfig';
 import { ThemeId, UserProfile } from '../types';
 import { playAsmrClick, playAsmrTick, playBootChime } from './SoundEngine';
-import { Compass, Laptop, LogIn, Mail, Sparkles, User, Shield, Terminal } from 'lucide-react';
+import { Compass, Laptop, LogIn, Mail, Sparkles, User, Shield, Terminal, X } from 'lucide-react';
 
 interface LoginScreenProps {
   onLoginComplete: (profile: UserProfile) => void;
@@ -19,6 +19,16 @@ export default function LoginScreen({ onLoginComplete, defaultEmail }: LoginScre
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
+  const [savedAccounts, setSavedAccounts] = useState<UserProfile[]>([]);
+
+  useEffect(() => {
+    const data = localStorage.getItem('landala_registered_accounts');
+    if (data) {
+      try {
+        setSavedAccounts(JSON.parse(data));
+      } catch (e) {}
+    }
+  }, []);
   
   const [selectedThemeId, setSelectedThemeId] = useState<ThemeId>('kashmir-wood');
   const [bootLogs, setBootLogs] = useState<string[]>([]);
@@ -120,6 +130,60 @@ export default function LoginScreen({ onLoginComplete, defaultEmail }: LoginScre
             </h1>
             <p className="text-stone-400 text-sm">Quiet, therapeutic operating system environment.</p>
           </div>
+
+          {savedAccounts.length > 0 && (
+            <div className="space-y-2.5 border-b border-stone-800/60 pb-4">
+              <span className="block text-[10px] font-mono uppercase tracking-wider text-stone-500">Saved Accounts</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[140px] overflow-y-auto pr-1 select-none">
+                {savedAccounts.map((acc, idx) => (
+                  <div
+                    key={idx}
+                    className="group relative p-2 rounded-lg bg-stone-950 border border-stone-850 hover:border-stone-800 text-left flex items-center justify-between transition-all"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playAsmrClick();
+                        setUsername(acc.username);
+                        setSelectedThemeId(acc.selectedTheme);
+                        // Complete login instantly!
+                        onLoginComplete({
+                          username: acc.username,
+                          avatarLetter: acc.avatarLetter,
+                          avatarColor: acc.avatarColor,
+                          selectedTheme: acc.selectedTheme
+                        });
+                      }}
+                      onMouseEnter={handleHover}
+                      className="flex-1 flex items-center gap-2 min-w-0 pr-1"
+                    >
+                      <div 
+                        className="w-6.5 h-6.5 rounded-full bg-black/40 flex items-center justify-center shrink-0 border text-white font-black text-[10px]"
+                        style={{ borderColor: THEMES.find(t => t.id === acc.selectedTheme)?.primary || '#fff' }}
+                      >
+                        {acc.avatarLetter}
+                      </div>
+                      <span className="text-[11px] font-bold text-stone-200 truncate">{acc.username}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        playAsmrClick();
+                        const nextAccounts = savedAccounts.filter(a => a.username.toLowerCase() !== acc.username.toLowerCase());
+                        setSavedAccounts(nextAccounts);
+                        localStorage.setItem('landala_registered_accounts', JSON.stringify(nextAccounts));
+                      }}
+                      className="p-1 rounded text-stone-600 hover:text-red-400 opacity-60 hover:opacity-100 transition-all"
+                      title="Forget account"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <form onSubmit={handleAuthSubmit} className="space-y-4">
             <div>
@@ -229,21 +293,35 @@ export default function LoginScreen({ onLoginComplete, defaultEmail }: LoginScre
                 <span className="text-xs font-mono text-stone-400 block mt-0.5">Profile initial set</span>
               </div>
 
-              <div className="w-full border-t border-stone-800 pt-4 text-center">
-                <label className="block text-xs font-mono text-stone-400 uppercase tracking-wider mb-2">Configure Initial</label>
-                <input
-                  id="avatar-initial-input"
-                  maxLength={1}
-                  type="text"
-                  value={firstLetter}
-                  onChange={(e) => {
-                    const char = e.target.value;
-                    if (char) {
-                      setUsername(char + (username ? username.slice(1) : ''));
-                    }
-                  }}
-                  className="w-12 text-center py-1 bg-stone-950 border border-stone-800 rounded-lg text-white focus:outline-none font-bold uppercase font-mono text-lg"
-                />
+              <div className="w-full border-t border-stone-800 pt-4 text-center space-y-4">
+                <div>
+                  <label className="block text-[10px] font-mono text-stone-400 uppercase tracking-wider mb-1.5">Configure Initial</label>
+                  <input
+                    id="avatar-initial-input"
+                    maxLength={1}
+                    type="text"
+                    value={firstLetter}
+                    onChange={(e) => {
+                      const char = e.target.value;
+                      if (char) {
+                        setUsername(char + (username ? username.slice(1) : ''));
+                      }
+                    }}
+                    className="w-12 text-center py-1 bg-stone-950 border border-stone-800 rounded-lg text-white focus:outline-none font-bold uppercase font-mono text-lg"
+                  />
+                </div>
+
+                <div className="pt-2 px-2 border-t border-stone-800/50">
+                  <label className="block text-[10px] font-mono text-stone-400 uppercase tracking-wider mb-1.5">Configure Full Name</label>
+                  <input
+                    id="avatar-username-input"
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="e.g., fossguru"
+                    className="w-full text-center py-1.5 px-3 bg-stone-950 border border-stone-800 rounded-lg text-white font-medium focus:ring-1 focus:ring-stone-600 focus:outline-none focus:border-transparent text-xs"
+                  />
+                </div>
               </div>
             </div>
 

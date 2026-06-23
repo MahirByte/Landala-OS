@@ -27,6 +27,7 @@ import { playAsmrClick, playAsmrTick, playBubbleSound } from './SoundEngine';
 
 interface SystemAppFilesProps {
   theme: ThemeConfig;
+  username: string;
 }
 
 interface VirtualFile {
@@ -40,7 +41,7 @@ interface VirtualFile {
   parentId?: string | null;
 }
 
-export default function SystemAppFiles({ theme }: SystemAppFilesProps) {
+export default function SystemAppFiles({ theme, username }: SystemAppFilesProps) {
   const [files, setFiles] = useState<VirtualFile[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -60,7 +61,11 @@ export default function SystemAppFiles({ theme }: SystemAppFilesProps) {
   const soundClick = () => playAsmrClick();
 
   const loadFiles = () => {
-    const data = localStorage.getItem('landala_virtual_files');
+    const userKey = `landala_virtual_files_${username}`;
+    let data = localStorage.getItem(userKey);
+    if (!data && username === 'fossguru') {
+      data = localStorage.getItem('landala_virtual_files');
+    }
     if (data) {
       try {
         setFiles(JSON.parse(data));
@@ -89,7 +94,7 @@ export default function SystemAppFiles({ theme }: SystemAppFilesProps) {
           parentId: null
         }
       ];
-      localStorage.setItem('landala_virtual_files', JSON.stringify(defaultSamples));
+      localStorage.setItem(userKey, JSON.stringify(defaultSamples));
       setFiles(defaultSamples);
     }
   };
@@ -138,7 +143,7 @@ export default function SystemAppFiles({ theme }: SystemAppFilesProps) {
       nextFiles = files.filter(f => f.id !== id);
     }
 
-    localStorage.setItem('landala_virtual_files', JSON.stringify(nextFiles));
+    localStorage.setItem(`landala_virtual_files_${username}`, JSON.stringify(nextFiles));
     setFiles(nextFiles);
     
     if (selectedFile?.id === id) {
@@ -161,7 +166,7 @@ export default function SystemAppFiles({ theme }: SystemAppFilesProps) {
     };
     
     const nextFiles = [newFolder, ...files];
-    localStorage.setItem('landala_virtual_files', JSON.stringify(nextFiles));
+    localStorage.setItem(`landala_virtual_files_${username}`, JSON.stringify(nextFiles));
     setFiles(nextFiles);
     setSelectedFile(newFolder);
     setRenamedName('Untitled Folder');
@@ -182,7 +187,7 @@ export default function SystemAppFiles({ theme }: SystemAppFilesProps) {
     };
 
     const nextFiles = [newFile, ...files];
-    localStorage.setItem('landala_virtual_files', JSON.stringify(nextFiles));
+    localStorage.setItem(`landala_virtual_files_${username}`, JSON.stringify(nextFiles));
     setFiles(nextFiles);
     setSelectedFile(newFile);
     setRenamedName('notes.txt');
@@ -208,7 +213,7 @@ export default function SystemAppFiles({ theme }: SystemAppFilesProps) {
       return f;
     });
 
-    localStorage.setItem('landala_virtual_files', JSON.stringify(updatedFiles));
+    localStorage.setItem(`landala_virtual_files_${username}`, JSON.stringify(updatedFiles));
     setFiles(updatedFiles);
     setSelectedFile({ ...selectedFile, name: renamedName.trim() });
     setIsRenaming(false);
@@ -240,7 +245,7 @@ export default function SystemAppFiles({ theme }: SystemAppFilesProps) {
       return f;
     });
 
-    localStorage.setItem('landala_virtual_files', JSON.stringify(updatedFiles));
+    localStorage.setItem(`landala_virtual_files_${username}`, JSON.stringify(updatedFiles));
     setFiles(updatedFiles);
     setSelectedFile({ 
       ...selectedFile, 

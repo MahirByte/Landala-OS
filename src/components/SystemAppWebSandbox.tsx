@@ -21,7 +21,12 @@ import {
   Sliders,
   Check,
   Download,
-  Folder
+  Folder,
+  Play,
+  Pause,
+  Music,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { AppWindow, ThemeConfig } from '../types';
 import { playAsmrClick, playAsmrTick, playBubbleSound } from './SoundEngine';
@@ -29,6 +34,7 @@ import { playAsmrClick, playAsmrTick, playBubbleSound } from './SoundEngine';
 interface SystemAppWebSandboxProps {
   app: AppWindow;
   theme: ThemeConfig;
+  username?: string;
 }
 
 interface InteractiveElement {
@@ -42,7 +48,7 @@ interface InteractiveElement {
   placeholder?: string;
 }
 
-export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxProps) {
+export default function SystemAppWebSandbox({ app, theme, username }: SystemAppWebSandboxProps) {
   const isMaximized = app?.isMaximized;
   const initialUrl = app.url || 'https://www.google.com/';
   const containerRef = useRef<HTMLDivElement>(null);
@@ -69,6 +75,102 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
   const [activeInput, setActiveInput] = useState<{ x: number; y: number; placeholder: string } | null>(null);
   const [typeValue, setTypeValue] = useState('');
 
+  // --- Virtual Audio Emulation State & Controls ---
+  const [mediaState, setMediaState] = useState<{
+    src: string;
+    isPlaying: boolean;
+    title: string;
+    muted: boolean;
+    volume: number;
+    tagName: string;
+    currentTime?: number;
+  } | null>(null);
+
+  const [audioVolume, setAudioVolume] = useState(0.5);
+  const [isAudioMuted, setIsAudioMuted] = useState(false);
+  const [selectedAmbientStation, setSelectedAmbientStation] = useState<string>('none');
+  const [ambientPlaying, setAmbientPlaying] = useState(false);
+
+  const localAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ambientAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const ambientStations = [
+    { id: 'none', name: '🔇 No Ambient Track', url: '' },
+    { id: 'lofi-sunset', name: '🌇 Sunset Lofi Chill', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' },
+    { id: 'rainy-cabin', name: '🌲 Cozy Forest Cabin', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3' },
+    { id: 'relaxing-waves', name: '🌊 Ocean Wave Beats', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3' },
+    { id: 'coffee-house', name: '☕ Coffee House Jazz', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3' }
+  ];
+
+  // Clean play/pause/reset lifecycle on destruction
+  useEffect(() => {
+    return () => {
+      if (localAudioRef.current) {
+        localAudioRef.current.pause();
+        localAudioRef.current = null;
+      }
+      if (ambientAudioRef.current) {
+        ambientAudioRef.current.pause();
+        ambientAudioRef.current = null;
+      }
+    };
+  }, []);
+
+  // Synchronize dynamic emulated page media feeds
+  useEffect(() => {
+    if (!localAudioRef.current) {
+      localAudioRef.current = new Audio();
+      localAudioRef.current.loop = true;
+    }
+
+    const player = localAudioRef.current;
+
+    if (mediaState && mediaState.src) {
+      if (player.src !== mediaState.src) {
+        player.src = mediaState.src;
+        player.currentTime = mediaState.currentTime || 0;
+      }
+
+      player.volume = isAudioMuted ? 0 : audioVolume;
+
+      if (mediaState.isPlaying) {
+        player.play().catch(err => {
+          console.warn('Playback gesture requirement active:', err);
+        });
+      } else {
+        player.pause();
+      }
+    } else {
+      player.pause();
+    }
+  }, [mediaState, audioVolume, isAudioMuted]);
+
+  // Synchronize ambient background layer
+  useEffect(() => {
+    if (!ambientAudioRef.current) {
+      ambientAudioRef.current = new Audio();
+      ambientAudioRef.current.loop = true;
+    }
+
+    const player = ambientAudioRef.current;
+    const activeStation = ambientStations.find(st => st.id === selectedAmbientStation);
+
+    if (activeStation && activeStation.url) {
+      if (player.src !== activeStation.url) {
+        player.src = activeStation.url;
+      }
+      player.volume = isAudioMuted ? 0 : audioVolume * 0.7; // soft mix
+
+      if (ambientPlaying) {
+        player.play().catch(o => {});
+      } else {
+        player.pause();
+      }
+    } else {
+      player.pause();
+    }
+  }, [selectedAmbientStation, ambientPlaying, audioVolume, isAudioMuted]);
+
   const soundTick = () => playAsmrTick();
   const soundClick = () => playAsmrClick();
 
@@ -80,8 +182,13 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
     setError(null);
     setActiveInput(null);
 
+    const isUrl = urlToGo.startsWith('http://') || urlToGo.startsWith('https://') || urlToGo.includes('.') || urlToGo.includes('/') || urlToGo.includes(':');
+    
     let destination = urlToGo.trim();
-    if (!/^https?:\/\//i.test(destination)) {
+    if (!isUrl) {
+      // Treat as a search query via Google
+      destination = `https://www.google.com/search?q=${encodeURIComponent(urlToGo)}`;
+    } else if (!destination.startsWith('http://') && !destination.startsWith('https://')) {
       destination = 'https://' + destination;
     }
 
@@ -110,6 +217,7 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
         setUrlInput(data.url);
         setPageTitle(data.title || 'Browser Session');
         setInteractiveElements(data.interactiveElements || []);
+        setMediaState(data.mediaState || null);
       } else {
         throw new Error(data.error || 'Failed to open page');
       }
@@ -150,6 +258,7 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
         setUrlInput(data.url);
         setPageTitle(data.title || 'Browser Session');
         setInteractiveElements(data.interactiveElements || []);
+        setMediaState(data.mediaState || null);
       } else {
         throw new Error(data.error || 'Action execution failed');
       }
@@ -307,9 +416,10 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
     };
 
     try {
-      const existing = localStorage.getItem('landala_virtual_files');
+      const userKey = username ? `landala_virtual_files_${username}` : 'landala_virtual_files';
+      const existing = localStorage.getItem(userKey);
       const filesList = existing ? JSON.parse(existing) : [];
-      localStorage.setItem('landala_virtual_files', JSON.stringify([newFile, ...filesList]));
+      localStorage.setItem(userKey, JSON.stringify([newFile, ...filesList]));
       playBubbleSound();
       setDownloadSuccessToast(`Successfully downloaded "${fileName}" to File Manager!`);
       setTimeout(() => setDownloadSuccessToast(null), 4000);
@@ -327,53 +437,53 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
     <div id={`web-emulator-${app.id}`} className="h-full flex flex-col overflow-hidden bg-stone-900 border border-stone-800 rounded-xl shadow-2xl relative select-none font-sans text-stone-200">
       
       {/* 🚀 EMULATOR HEADER / TOOLBAR */}
-      <div className="bg-stone-950 border-b border-stone-850 px-4 py-3 flex flex-wrap items-center gap-3 shrink-0">
+      <div className="bg-stone-950 border-b border-stone-850 px-3 py-1.5 flex flex-nowrap items-center gap-2 shrink-0 overflow-x-auto select-none no-scrollbar">
         
         {/* Navigation keys */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 shrink-0">
           <button
             onClick={() => triggerAction({ action: 'back' })}
             disabled={loading}
             onMouseEnter={soundTick}
-            className="p-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-850 disabled:opacity-30 disabled:pointer-events-none transition"
+            className="p-1 px-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-850 disabled:opacity-30 disabled:pointer-events-none transition"
             title="Go Back"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-3.5 h-3.5" />
           </button>
           
           <button
             onClick={() => triggerAction({ action: 'forward' })}
             disabled={loading}
             onMouseEnter={soundTick}
-            className="p-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-850 disabled:opacity-30 disabled:pointer-events-none transition"
+            className="p-1 px-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-850 disabled:opacity-30 disabled:pointer-events-none transition"
             title="Go Forward"
           >
-            <ArrowRight className="w-4 h-4" />
+            <ArrowRight className="w-3.5 h-3.5" />
           </button>
 
           <button
             onClick={() => triggerAction({ action: 'reload' })}
             disabled={loading}
             onMouseEnter={soundTick}
-            className="p-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-850 disabled:opacity-30 disabled:pointer-events-none transition"
+            className="p-1 px-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-850 disabled:opacity-30 disabled:pointer-events-none transition"
             title="Refresh Page"
           >
-            <RotateCw className="w-4 h-4" />
+            <RotateCw className="w-3.5 h-3.5" />
           </button>
 
           <button
             onClick={() => navigateTo(initialUrl)}
             disabled={loading}
             onMouseEnter={soundTick}
-            className="p-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-850 disabled:opacity-30 disabled:pointer-events-none transition"
+            className="p-1 px-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-850 disabled:opacity-30 disabled:pointer-events-none transition"
             title="Go Home"
           >
-            <Home className="w-4 h-4" />
+            <Home className="w-3.5 h-3.5" />
           </button>
         </div>
 
         {/* Address bar input */}
-        <div className="flex-1 min-w-[200px]">
+        <div className="flex-1 min-w-[150px] shrink-0">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -381,34 +491,34 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
             }}
             className="relative flex items-center"
           >
-            <Globe className="w-4 h-4 text-stone-500 absolute left-3" />
+            <Globe className="w-3.5 h-3.5 text-stone-500 absolute left-2.5" />
             <input
               type="text"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
               disabled={loading}
-              className="w-full bg-stone-900 border border-stone-800 disabled:opacity-65 rounded-xl pl-9 pr-24 py-1.5 text-xs text-stone-100 font-medium tracking-wide focus:outline-none focus:ring-1 focus:ring-stone-600 focus:border-transparent transition"
-              placeholder="Enter URL to browse (e.g. wikipedia.org)..."
+              className="w-full bg-stone-900 border border-stone-800 disabled:opacity-65 rounded-xl pl-8 pr-20 py-1 text-xs text-stone-200 font-medium tracking-wide focus:outline-none focus:ring-1 focus:ring-stone-600 focus:border-transparent transition"
+              placeholder="Type page URL..."
             />
             {/* Overlay indicators */}
-            <div className="absolute right-2 flex items-center gap-1 text-[9px] font-mono select-none">
-              <span className="bg-stone-800 text-stone-400 px-2 py-0.5 rounded-md border border-stone-750 font-semibold tracking-wider uppercase">
-                Chromium
+            <div className="absolute right-2 flex items-center gap-1 text-[8.5px] font-mono select-none">
+              <span className="bg-stone-800 text-stone-400 px-1.5 py-0.5 rounded-md border border-stone-750 font-bold uppercase tracking-wider">
+                Chrome
               </span>
             </div>
           </form>
         </div>
 
         {/* Utility Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={handleDownload}
             disabled={!screenshot || loading}
-            className="px-3 py-1.5 rounded-xl border border-stone-800 bg-stone-900 text-stone-400 hover:text-white hover:bg-stone-850 text-[11px] font-mono flex items-center gap-1.5 transition disabled:opacity-35 disabled:pointer-events-none"
-            title="Download webpage screenshot to landala filesystem"
+            className="px-2 py-1 rounded-xl border border-stone-800 bg-stone-900 text-stone-400 hover:text-white hover:bg-stone-850 text-[10px] font-mono flex items-center gap-1 transition disabled:opacity-35 disabled:pointer-events-none"
+            title="Download webpage screenshot to Landala File Manager"
           >
-            <Download className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Save to Files</span>
+            <Download className="w-3 h-3 text-emerald-400" />
+            <span className="hidden sm:inline">Save View</span>
           </button>
 
           <button
@@ -416,14 +526,15 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
               soundClick();
               setShowOverlays(!showOverlays);
             }}
-            className={`px-3 py-1.5 rounded-xl border text-[11px] font-mono flex items-center gap-1.5 transition ${
+            className={`px-2 py-1 rounded-xl border text-[10px] font-mono flex items-center gap-1 transition ${
               showOverlays 
                 ? 'bg-amber-500/10 border-amber-500/20 text-amber-400 font-semibold' 
-                : 'bg-stone-900 border-stone-800 text-stone-400 hover:text-stone-300'
+                : 'bg-stone-900 border-stone-800 text-stone-300 hover:text-white'
             }`}
+            title="Highlight links and input forms"
           >
-            <Sliders className="w-3.5 h-3.5" />
-            <span>{showOverlays ? 'Link Hints ON' : 'Link Hints OFF'}</span>
+            <Sliders className="w-3 h-3" />
+            <span className="hidden xs:inline">{showOverlays ? 'Hints' : 'No Hints'}</span>
           </button>
 
           <a
@@ -431,31 +542,128 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
             target="_blank"
             rel="noopener noreferrer"
             onClick={soundClick}
-            className="p-1.5 bg-stone-900 border border-stone-800 rounded-lg text-stone-400 hover:text-white transition flex items-center justify-center"
+            className="p-1 bg-stone-900 border border-stone-800 rounded-lg text-stone-400 hover:text-white transition flex items-center justify-center"
             title="Open Original Page in New Tab"
           >
-            <ExternalLink className="w-4 h-4" />
+            <ExternalLink className="w-3.5 h-3.5" />
           </a>
         </div>
+      </div>
 
+      {/* 🎵 VIRTUAL CHROMIUM AUDIO DECK */}
+      <div className="bg-stone-900 border-b border-stone-850 px-3 py-1.5 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0 select-none font-sans text-stone-300">
+        <div className="flex items-center gap-2 max-w-xs sm:max-w-md overflow-hidden truncate">
+          <Music className={`w-3.5 h-3.5 shrink-0 ${mediaState?.isPlaying || ambientPlaying ? 'text-emerald-400 animate-spin' : 'text-stone-500'}`} style={{ animationDuration: '3s' }} />
+          
+          {mediaState && mediaState.src ? (
+            <div className="flex items-center gap-1.5 overflow-hidden truncate">
+              <span className="bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded text-[8px] font-mono font-black uppercase tracking-wider h-4 flex items-center">
+                Page Audio
+              </span>
+              <span className="font-mono text-[9.5px] font-bold text-stone-200 truncate" title={mediaState.title}>
+                {mediaState.title}
+              </span>
+              {mediaState.isPlaying && (
+                <div className="flex items-end gap-0.5 h-2.5 px-1 pb-0.5 shrink-0">
+                  <div className="w-[1.5px] h-1 bg-emerald-400 animate-[bounce_1s_infinite]" style={{ animationDelay: '0.1s' }} />
+                  <div className="w-[1.5px] h-2 bg-emerald-400 animate-[bounce_0.8s_infinite]" style={{ animationDelay: '0.3s' }} />
+                  <div className="w-[1.5px] h-1.5 bg-emerald-400 animate-[bounce_1.2s_infinite]" style={{ animationDelay: '0.5s' }} />
+                </div>
+              )}
+            </div>
+          ) : ambientPlaying ? (
+            <div className="flex items-center gap-1.5 overflow-hidden truncate">
+              <span className="bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded text-[8px] font-mono font-black uppercase tracking-wider h-4 flex items-center">
+                Live Station
+              </span>
+              <span className="font-mono text-[9.5px] font-semibold text-stone-200 truncate">
+                {ambientStations.find(s => s.id === selectedAmbientStation)?.name?.split(' ').slice(1).join(' ') || 'Soundscape'}
+              </span>
+              <div className="flex items-end gap-0.5 h-2.5 px-0.5 pb-0.5 shrink-0">
+                <div className="w-[1.5px] h-2 bg-amber-400 animate-[bounce_0.7s_infinite]" style={{ animationDelay: '0.2s' }} />
+                <div className="w-[1.5px] h-1.5 bg-amber-400 animate-[bounce_0.9s_infinite]" style={{ animationDelay: '0.0s' }} />
+                <div className="w-[1.5px] h-2.5 bg-amber-400 animate-[bounce_1.1s_infinite]" style={{ animationDelay: '0.4s' }} />
+              </div>
+            </div>
+          ) : (
+            <span className="text-[9.5px] uppercase font-mono tracking-wider font-semibold text-stone-500">
+              No active media stream found on page
+            </span>
+          )}
+        </div>
+
+        {/* Audio Console Controls */}
+        <div className="flex items-center gap-3 ml-auto text-[9.5px] font-mono shrink-0">
+          
+          <div className="flex items-center gap-1">
+            <span className="text-stone-500 text-[8.5px] uppercase font-bold">Soundscape:</span>
+            <select
+              value={selectedAmbientStation}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedAmbientStation(val);
+                setAmbientPlaying(val !== 'none');
+                soundClick();
+              }}
+              className="bg-stone-950 border border-stone-850 px-1.5 py-0.5 rounded text-[9px] text-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-700 font-bold"
+            >
+              {ambientStations.map(station => (
+                <option key={station.id} value={station.id} className="bg-stone-900 text-stone-300">
+                  {station.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="h-3 w-px bg-stone-800" />
+
+          {/* Volume Deck */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => {
+                setIsAudioMuted(!isAudioMuted);
+                soundClick();
+              }}
+              className="p-0.5 px-1 rounded bg-stone-950 hover:bg-stone-850 border border-stone-850 text-stone-400 hover:text-white transition flex items-center justify-center h-5"
+              title={isAudioMuted ? 'Unmute Audio Feed' : 'Mute Audio Feed'}
+            >
+              {isAudioMuted ? <VolumeX className="w-3 h-3 text-red-400" /> : <Volume2 className="w-3 h-3 text-emerald-400" />}
+            </button>
+
+            <div className="flex items-center select-none">
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={audioVolume}
+                onChange={(e) => {
+                  setAudioVolume(Number(e.target.value));
+                }}
+                className="w-12 sm:w-16 h-1 bg-stone-950 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                title={`Volume: ${Math.round(audioVolume * 100)}%`}
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* 📺 CRITICAL MONITORING BAR */}
-      <div className="bg-stone-950 border-b border-stone-850 px-4 py-2 flex items-center justify-between text-xs font-mono text-stone-500">
+      <div className="bg-stone-950 border-b border-stone-850 px-3 py-1 flex items-center justify-between text-[10px] font-mono text-stone-500 select-none shrink-0">
         <div className="flex items-center gap-1.5 overflow-hidden">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-          <span className="font-bold text-stone-300 truncate tracking-wide leading-none">{pageTitle}</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+          <span className="font-bold text-stone-400 truncate tracking-wide leading-none">{pageTitle}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[10px] text-stone-500 leading-none">Sandbox CORS Bypass</span>
+          <span className="text-[9px] text-stone-600 leading-none uppercase">Virtual Sandbox Bridge</span>
         </div>
       </div>
 
       {/* 🎭 CORE EMULATED AREA */}
       <div className="flex-1 flex overflow-hidden relative bg-stone-950">
         {/* Virtual Web Content */}
-        <div className={`flex-1 flex flex-col justify-start items-center overflow-hidden select-none bg-stone-950 relative ${
-          isMaximized ? 'pt-4 pb-8 px-6 sm:pt-5 sm:pb-10 sm:px-10 md:pt-6 md:pb-12 md:px-12 lg:pt-8 lg:pb-16 lg:px-16' : 'p-0'
+        <div className={`flex-1 flex flex-col justify-center items-center overflow-hidden select-none bg-stone-950 relative ${
+          isMaximized ? 'pt-1.5 pb-6 px-6 sm:pt-2 sm:pb-8 sm:px-10 md:pt-2 md:pb-10 md:px-12 lg:pt-2.5 lg:pb-12 lg:px-16' : 'p-2'
         }`}>
           
           {error ? (
@@ -478,10 +686,10 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
               <div className="text-xs tracking-wider font-bold">CONNECTING CHROME ENGINE...</div>
             </div>
           ) : screenshot ? (
-            <div className={`flex items-stretch justify-center max-w-full max-h-full select-none shadow-2xl bg-stone-900 ${
+            <div className={`flex items-stretch justify-center max-w-full max-h-full select-none shadow-2xl bg-stone-940 ${
               isMaximized 
                 ? 'w-auto h-auto max-w-full max-h-full aspect-[1280/800] sm:aspect-[1440/800] border border-stone-800 rounded-2xl overflow-hidden'
-                : 'w-full h-full border-none rounded-none !aspect-auto'
+                : 'w-auto h-auto max-w-full max-h-full aspect-[1280/800] border border-stone-800 rounded-lg overflow-hidden'
             }`}>
               
               {/* 🛡️ Left Thicc Console Frame Panel */}
@@ -501,12 +709,12 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
                     </div>
                     <span className="text-[8px] font-mono text-stone-500 font-bold uppercase tracking-wider">PWR</span>
                   </div>
-
+ 
                   {/* Vertical Branding / Label text */}
                   <div className="font-mono text-[8px] text-stone-500 font-bold uppercase tracking-[0.3em] [writing-mode:vertical-lr] my-auto pointer-events-none select-none">
                     L A N D A L A
                   </div>
-
+ 
                   {/* Bottom hardware screw look */}
                   <div className="flex flex-col gap-1">
                     <div className="w-2 h-0.5 rounded bg-stone-950 border border-stone-850" />
@@ -514,21 +722,17 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
                   </div>
                 </div>
               )}
-
+ 
               {/* 📺 The actual Interactive Browser emulator screen */}
-              <div className={`relative flex-1 bg-stone-950 select-none overflow-hidden h-full ${
-                !isMaximized ? 'w-full aspect-auto' : ''
-              }`}>
+              <div className="relative flex-1 bg-stone-950 select-none overflow-hidden h-full w-full">
                 
                 {/* Image Screenshot Frame */}
                 <img
                   src={screenshot}
                   alt="Emulated Page View"
-                  className={`w-full h-full pointer-events-none select-none max-w-full max-h-full ${
-                    isMaximized ? 'object-contain' : 'object-fill'
-                  }`}
+                  className="w-full h-full pointer-events-none select-none max-w-full max-h-full object-fill"
                 />
-
+ 
                 {/* Click Interceptor Overlays */}
                 <div
                   ref={containerRef}
@@ -537,7 +741,7 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
                     isPointerLocked ? 'cursor-none bg-transparent' : 'cursor-crosshair'
                   }`}
                 />
-
+ 
                 {/* Active virtual pointer cursor */}
                 {isPointerLocked && (
                   <div 
@@ -551,7 +755,7 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
                     <MousePointer className="w-5 h-5 fill-white text-stone-950 stroke-[1.5]" />
                   </div>
                 )}
-
+ 
                 {/* Interactive Hints Overlay Layer (renders links on demand) */}
                 {showOverlays && (
                   <div className="absolute inset-0 pointer-events-none z-20">
@@ -560,10 +764,28 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
                       return (
                         <div
                           key={index}
-                          className={`absolute border rounded-sm transition-all duration-150 ${
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            if (isInput) {
+                              soundTick();
+                              setActiveInput({
+                                x: el.x,
+                                y: el.y,
+                                placeholder: el.placeholder || el.text || 'Type text into this field...'
+                              });
+                              setTypeValue('');
+                              if (document.pointerLockElement) {
+                                document.exitPointerLock();
+                              }
+                            } else {
+                              triggerVirtualClick(el.x + el.w / 2, el.y + el.h / 2);
+                            }
+                          }}
+                          className={`absolute border rounded-sm transition-all duration-150 pointer-events-auto cursor-pointer ${
                             isInput 
-                              ? 'border-yellow-400/40 bg-yellow-400/5 hover:border-yellow-300' 
-                              : 'border-emerald-500/45 bg-emerald-500/5 hover:border-emerald-400'
+                              ? 'border-yellow-400/60 bg-yellow-400/5 hover:border-yellow-450 hover:bg-yellow-400/15 cursor-text' 
+                              : 'border-emerald-500/45 bg-emerald-500/5 hover:border-emerald-400 hover:bg-emerald-500/15'
                           }`}
                           style={{
                             left: `${(el.x / 1280) * 100}%`,
@@ -571,25 +793,25 @@ export default function SystemAppWebSandbox({ app, theme }: SystemAppWebSandboxP
                             width: `${(el.w / 1280) * 100}%`,
                             height: `${(el.h / 800) * 100}%`
                           }}
-                          title={el.text || el.href || el.tag}
+                          title={el.placeholder || el.text || el.href || el.tag}
                         />
                       );
                     })}
                   </div>
                 )}
-
+ 
                 {/* Secure navigation user helper banners */}
                 {!isPointerLocked ? (
-                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3.5 py-2 bg-stone-950/85 backdrop-blur-md rounded-xl border border-stone-800 text-[10px] font-mono text-stone-400 pointer-events-none z-30 shadow-2xl tracking-wide whitespace-nowrap animate-pulse">
-                    Click screen to lock cursor inside browser
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-stone-950/85 backdrop-blur-md rounded-xl border border-stone-800 text-[9px] font-mono text-stone-400 pointer-events-none z-30 shadow-2xl tracking-wide whitespace-nowrap animate-pulse">
+                    Click background to lock pointer inside browser, or click overlays directly!
                   </div>
                 ) : (
-                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3.5 py-2 bg-stone-950/85 backdrop-blur-md rounded-xl border border-emerald-500/30 text-[10px] font-mono text-emerald-400 pointer-events-none z-30 shadow-2xl tracking-wide whitespace-nowrap flex items-center gap-2">
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-stone-950/85 backdrop-blur-md rounded-xl border border-emerald-500/30 text-[9px] font-mono text-emerald-400 pointer-events-none z-30 shadow-2xl tracking-wide whitespace-nowrap flex items-center gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                    <span>Interactive Session. Press <kbd className="bg-stone-800 text-stone-200 px-1 py-0.5 rounded text-[9px]">ESC</kbd> to exit.</span>
+                    <span>Interactive Session. Press <kbd className="bg-stone-800 text-stone-200 px-1 py-0.5 rounded text-[8px]">ESC</kbd> to exit.</span>
                   </div>
                 )}
-
+ 
               </div>
 
               {/* 🛡️ Right Thicc Console Frame Panel */}

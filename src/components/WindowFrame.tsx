@@ -246,7 +246,7 @@ export default function WindowFrame({
             }`}
             title={app.isMaximized ? "Restore Size" : "Maximize"}
           >
-            {app.isMaximized ? <Copy className="w-3" h-3 /> : <Square className="w-3 h-3" />}
+            {app.isMaximized ? <Copy className="w-3 h-3" /> : <Square className="w-3 h-3" />}
           </button>
 
           {/* Close button */}

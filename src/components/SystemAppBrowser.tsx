@@ -13,6 +13,7 @@ interface SystemAppBrowserProps {
   app?: AppWindow;
   theme: ThemeConfig;
   defaultEngine: BrowserEngine;
+  username?: string;
 }
 
 // Built-in list of safe iframe links to recommend in bookmarks
@@ -47,7 +48,7 @@ const isSandboxUrl = (url: string) => {
   return domains.some(domain => url.toLowerCase().includes(domain));
 };
 
-export default function SystemAppBrowser({ app, theme, defaultEngine }: SystemAppBrowserProps) {
+export default function SystemAppBrowser({ app, theme, defaultEngine, username }: SystemAppBrowserProps) {
   const [engine, setEngine] = useState<BrowserEngine>(defaultEngine);
   const [urlInput, setUrlInput] = useState(ENGINE_HOMEPAGES[defaultEngine] || 'https://www.google.com/');
   const [currentUrl, setCurrentUrl] = useState(ENGINE_HOMEPAGES[defaultEngine] || 'https://www.google.com/');
@@ -390,6 +391,7 @@ export default function SystemAppBrowser({ app, theme, defaultEngine }: SystemAp
                 <SystemAppWebSandbox
                   app={app ? { ...app, url: currentUrl } : { id: 'browser-web-sandbox', url: currentUrl, title: 'Portal Page', isMaximized: false } as any}
                   theme={theme}
+                  username={username}
                 />
               ) : (
                 <iframe
